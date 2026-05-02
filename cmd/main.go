@@ -12,8 +12,9 @@ type TermData struct {
 	Occurence int64
 }
 
-type InvertedIndex struct {
+type Search struct {
 	invertedIndex map[string][]*TermData
+	ngramIndex    map[string][]string
 }
 
 func main() {
@@ -39,39 +40,42 @@ func main() {
 		return
 	}
 
-	for key, value := range result {
-		fmt.Printf("\n Checking item %v, \n", key)
-		printKeys((value))
-	}
+	// for index, value := range result {
+	// 	fmt.Printf("\n Checking item %v, \n", index)
+	// 	printKeys(value)
+	// }
+
+	invertedIndex := New()
+
+	invertedIndex.CreateIndex(result)
+
+	writeToFile("test-inverted-index.json", invertedIndex.invertedIndex)
+	writeToFile("test-ngram.json", invertedIndex.ngramIndex)
 
 }
 
-func printKeys(jsonObj map[string]interface{}) {
-	for key, value := range jsonObj {
-		fmt.Printf(" Key: %s", key)
+// func printKeys(jsonObj map[string]interface{}) {
+// 	for key, value := range jsonObj {
+// 		fmt.Printf(" Key: %s", key)
 
-		if nestedMap, ok := value.(map[string]interface{}); ok {
-			printKeys(nestedMap)
-		}
+// 		if nestedMap, ok := value.(map[string]interface{}); ok {
+// 			printKeys(nestedMap)
+// 		}
 
+// 	}
+// }
+
+func New() *Search {
+	return &Search{
+		invertedIndex: make(map[string][]*TermData),
+		ngramIndex:    make(map[string][]string),
 	}
 }
 
-func (ii *InvertedIndex) createIndex(jsonObj map[string]interface{}) {
-	for key, value := range jsonObj {
+func (ii *Search) CreateIndex(jsonObj []map[string]interface{}) {
+	for index, value := range jsonObj {
 
-		// Convert the key from string to int
-		docId, err := strconv.ParseInt(key, 10, 64)
-		if err != nil {
-			// Key is not a valid integer - skip or handle error
-			fmt.Printf("Invalid docId key: %s\n", key)
-			continue
-		}
-		if isAnyInt(value) {
-			if nestedMap, ok := value.(map[string]interface{}); ok {
-				ii.traverseObj(nestedMap, docId)
-			}
-		}
+		ii.traverseObj(value, int64(index))
 
 	}
 }
@@ -97,7 +101,8 @@ func primitiveToString(v interface{}) string {
 	}
 }
 
-func (ii *InvertedIndex) addToIndex(str string, docId int64) {
+func (ii *Search) addToIndex(str string, docId int64) {
+
 	if termData, ok := ii.invertedIndex[str]; ok {
 		for _, dataPoint := range termData {
 			if dataPoint.DocId == docId {
@@ -116,11 +121,14 @@ func (ii *InvertedIndex) addToIndex(str string, docId int64) {
 			{DocId: docId, Occurence: 1},
 		}
 	}
+
+	ii.addToNgram(str)
 }
 
-func (ii *InvertedIndex) traverseObj(obj map[string]interface{}, docId int64) {
+func (ii *Search) traverseObj(obj map[string]interface{}, docId int64) {
 	for _, value := range obj {
 		if str := primitiveToString(value); str != "" {
+
 			ii.addToIndex(str, docId)
 		}
 
@@ -141,11 +149,47 @@ func (ii *InvertedIndex) traverseObj(obj map[string]interface{}, docId int64) {
 	}
 }
 
-func isAnyInt(v interface{}) bool {
-	switch v.(type) {
-	case int, int8, int16, int32, int64:
-		return true
-	default:
-		return false
+func writeToFile(filename string, v any) error {
+	jsonData, err := json.MarshalIndent(v, "", " ")
+	if err != nil {
+		return fmt.Errorf("failed to Marshal json: %w", err)
 	}
+
+	err = os.WriteFile(filename, jsonData, 0644)
+
+	if err != nil {
+		return fmt.Errorf("failed to write filr %w", err)
+	}
+
+	return nil
+}
+
+func (ii *Search) addToNgram(str string) {
+	patterns := generateNGramPatterns(str, 3)
+
+	for _, pattern := range patterns {
+		ii.ngramIndex[pattern] = append(ii.ngramIndex[pattern], str)
+	}
+}
+
+func generateNGramPatterns(word string, n int) []string {
+	patterns := []string{}
+	length := len(word)
+
+	if length < n {
+		return patterns
+	}
+
+	patterns = append(patterns, fmt.Sprintf("^%s", word[:n-1]))
+
+	for i := 0; i <= length-n; i++ {
+		if i == 0 {
+			continue
+		}
+		patterns = append(patterns, word[i:i+n])
+	}
+
+	patterns = append(patterns, fmt.Sprintf("%s$", word[length-(n-1):]))
+
+	return patterns
 }
